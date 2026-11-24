@@ -1,0 +1,1582 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SUZUYUN'S SANITY - Deadlock BO3 Tournament</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            obsidian: {
+              950: '#07080c',
+              900: '#0d0f14',
+              800: '#151922',
+              700: '#1f2533',
+              600: '#2d3548'
+            },
+            brass: {
+              300: '#f3e5ab',
+              400: '#e5c158',
+              500: '#d4af37',
+              600: '#aa8c2c',
+              700: '#7e6820'
+            },
+            amberhand: {
+              400: '#fbbf24',
+              500: '#f59e0b',
+              600: '#d97706'
+            },
+            sapphire: {
+              400: '#38bdf8',
+              500: '#0284c7',
+              600: '#0369a1'
+            }
+          },
+          fontFamily: {
+            deco: ['Cinzel', 'serif'],
+            sans: ['Inter', 'sans-serif']
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- React, React DOM, Babel -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Firebase ES Modules Loader script -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'suzuyun-sanity-deadlock';
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+    const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+    let dbInstance = null;
+    let authInstance = null;
+    let docRef = null;
+
+    window.FirebaseStore = {
+      appId,
+      isConfigured: !!firebaseConfig,
+      init: async (onData, onError) => {
+        if (!firebaseConfig) {
+          console.warn("No Firebase config detected. Using localStorage persistence mode.");
+          return null;
+        }
+        try {
+          const app = initializeApp(firebaseConfig);
+          authInstance = getAuth(app);
+          dbInstance = getFirestore(app);
+
+          let userCred;
+          if (initialAuthToken) {
+            userCred = await signInWithCustomToken(authInstance, initialAuthToken);
+          } else {
+            userCred = await signInAnonymously(authInstance);
+          }
+
+          if (!userCred || !userCred.user) {
+            throw new Error("Firebase authentication failed.");
+          }
+
+          // Rule 1 strictly followed: /artifacts/{appId}/public/data/{collectionName}/{docId}
+          docRef = doc(dbInstance, 'artifacts', appId, 'public', 'data', 'tournament', 'stateDoc');
+
+          const unsubscribe = onSnapshot(docRef, (snapshot) => {
+            if (snapshot.exists()) {
+              onData(snapshot.data());
+            }
+          }, (err) => {
+            console.error("Firestore snapshot error:", err);
+            if (onError) onError(err);
+          });
+
+          return {
+            saveState: async (data) => {
+              if (!authInstance || !authInstance.currentUser || !docRef) return;
+              await setDoc(docRef, data, { merge: true });
+            },
+            unsubscribe
+          };
+        } catch (err) {
+          console.error("Firebase init failed:", err);
+          if (onError) onError(err);
+          return null;
+        }
+      }
+    };
+  </script>
+
+  <style>
+    body {
+      background-color: #07080c;
+      color: #e2e8f0;
+      font-family: 'Inter', sans-serif;
+      overflow-x: hidden;
+    }
+    
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0d0f14;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #2d3548;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #d4af37;
+    }
+
+    .brass-gradient-text {
+      background: linear-gradient(135deg, #fff2aa 0%, #d4af37 50%, #aa8c2c 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .bg-deadlock-grid {
+      background-image: radial-gradient(rgba(212, 175, 55, 0.08) 1px, transparent 0);
+      background-size: 24px 24px;
+    }
+
+    section[id] {
+      scroll-margin-top: 90px;
+    }
+  </style>
+</head>
+<body class="bg-deadlock-grid min-h-screen">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useRef } = React;
+
+    // --- DEADLOCK HERO DATABASE ---
+    const HEROES = [
+      { id: "Abrams", name: "Abrams", icon: "✊" },
+      { id: "Bebop", name: "Bebop", icon: "🤖" },
+      { id: "Dynamo", name: "Dynamo", icon: "🌀" },
+      { id: "Grey Talon", name: "Grey Talon", icon: "🏹" },
+      { id: "Haze", name: "Haze", icon: "🎯" },
+      { id: "Infernus", name: "Infernus", icon: "🔥" },
+      { id: "Ivy", name: "Ivy", icon: "🗿" },
+      { id: "Kelvin", name: "Kelvin", icon: "❄️" },
+      { id: "Lady Geist", name: "Lady Geist", icon: "🩸" },
+      { id: "Lash", name: "Lash", icon: "🪢" },
+      { id: "McGinnis", name: "McGinnis", icon: "🛠️" },
+      { id: "Mirage", name: "Mirage", icon: "🪔" },
+      { id: "Mo & Krill", name: "Mo & Krill", icon: "🦡" },
+      { id: "Paradox", name: "Paradox", icon: "⏳" },
+      { id: "Pocket", name: "Pocket", icon: "💼" },
+      { id: "Seven", name: "Seven", icon: "⚡" },
+      { id: "Shiv", name: "Shiv", icon: "🗡️" },
+      { id: "Vindicta", name: "Vindicta", icon: "🎯" },
+      { id: "Viscous", name: "Viscous", icon: "🧪" },
+      { id: "Warden", name: "Warden", icon: "👮" },
+      { id: "Wraith", name: "Wraith", icon: "🃏" },
+      { id: "Yamato", name: "Yamato", icon: "⚔️" }
+    ];
+
+    // --- DEFAULT INITIAL TOURNAMENT SETUP ---
+    const DEFAULT_TEAMS = [
+      {
+        id: "t1",
+        name: "Team 1 (T1)",
+        tag: "T1",
+        seed: 1,
+        streamer: "twitch.tv/suzuyun_t1",
+        roster: [
+          { id: "p1", name: "Nocturne", hero: "Seven", role: "Carry" },
+          { id: "p2", name: "Vesper", hero: "Pocket", role: "Flex" },
+          { id: "p3", name: "Brimstone", hero: "Abrams", role: "Frontline" },
+          { id: "p4", name: "Aethel", hero: "Paradox", role: "Utility" },
+          { id: "p5", name: "Solstice", hero: "Kelvin", role: "Support" },
+          { id: "p6", name: "Kage", hero: "Haze", role: "Assassin" }
+        ]
+      },
+      {
+        id: "t2",
+        name: "Team 2 (T2)",
+        tag: "T2",
+        seed: 2,
+        streamer: "twitch.tv/t2_streamer",
+        roster: [
+          { id: "p7", name: "Phantom", hero: "Wraith", role: "Carry" },
+          { id: "p8", name: "Grave", hero: "Dynamo", role: "Support" },
+          { id: "p9", name: "Grimm", hero: "Lash", role: "Flex" },
+          { id: "p10", name: "Spectre", hero: "Infernus", role: "Carry" },
+          { id: "p11", name: "Blight", hero: "Viscous", role: "Utility" },
+          { id: "p12", name: "Crypt", hero: "Mo & Krill", role: "Tank" }
+        ]
+      },
+      {
+        id: "t3",
+        name: "Team 3 (T3)",
+        tag: "T3",
+        seed: 3,
+        streamer: "twitch.tv/t3_streamer",
+        roster: [
+          { id: "p13", name: "Zephyr", hero: "Vindicta", role: "Sniper" },
+          { id: "p14", name: "Vortex", hero: "Ivy", role: "Support" },
+          { id: "p15", name: "Tempest", hero: "Yamato", role: "Brawler" },
+          { id: "p16", name: "Squall", hero: "Shiv", role: "Flex" },
+          { id: "p17", name: "Typhoon", hero: "Lady Geist", role: "Mage" },
+          { id: "p18", name: "Gale", hero: "Bebop", role: "Initiator" }
+        ]
+      },
+      {
+        id: "t4",
+        name: "Team 4 (T4)",
+        tag: "T4",
+        seed: 4,
+        streamer: "twitch.tv/t4_streamer",
+        roster: [
+          { id: "p19", name: "Reznok", hero: "McGinnis", role: "Engineer" },
+          { id: "p20", name: "Slick", hero: "Mirage", role: "Roamer" },
+          { id: "p21", name: "Baron", hero: "Warden", role: "Frontline" },
+          { id: "p22", name: "Bossman", hero: "Grey Talon", role: "Ranger" },
+          { id: "p23", name: "Grifter", hero: "Abrams", role: "Tank" },
+          { id: "p24", name: "Racket", hero: "Seven", role: "Hypercarry" }
+        ]
+      }
+    ];
+
+    const DEFAULT_MATCHES = [
+      {
+        id: "semi_1",
+        roundLabel: "Semifinal 1 (T1 vs T2)",
+        scheduledTime: "12 Dec 2026 02:00 PM SGT",
+        status: "upcoming",
+        streamMode: "Main Stream",
+        teamAId: "t1",
+        teamBId: "t2",
+        games: [
+          {
+            winner: null,
+            sideA: "Amber Hand",
+            sideB: "Sapphire Flame",
+            bansA: ["Haze", "Seven"],
+            bansB: ["Vindicta", "Bebop"],
+            heroesA: [],
+            heroesB: [],
+            screenshotVerified: false,
+            duration: "",
+            mvp: ""
+          },
+          {
+            winner: null,
+            sideA: "Sapphire Flame",
+            sideB: "Amber Hand",
+            bansA: ["Pocket", "Dynamo"],
+            bansB: ["Lady Geist", "Abrams"],
+            heroesA: [],
+            heroesB: [],
+            screenshotVerified: false,
+            duration: "",
+            mvp: ""
+          },
+          {
+            winner: null,
+            sideA: "Amber Hand",
+            sideB: "Sapphire Flame",
+            bansA: [],
+            bansB: [],
+            heroesA: [],
+            heroesB: [],
+            screenshotVerified: false,
+            duration: "",
+            mvp: ""
+          }
+        ]
+      },
+      {
+        id: "semi_2",
+        roundLabel: "Semifinal 2 (T3 vs T4)",
+        scheduledTime: "12 Dec 2026 02:00 PM SGT",
+        status: "upcoming",
+        streamMode: "Off-Stream (To Save Time)",
+        teamAId: "t3",
+        teamBId: "t4",
+        games: [
+          {
+            winner: null,
+            sideA: "Amber Hand",
+            sideB: "Sapphire Flame",
+            bansA: ["Seven", "Viscous"],
+            bansB: ["Paradox", "Lash"],
+            heroesA: [],
+            heroesB: [],
+            screenshotVerified: false,
+            duration: "",
+            mvp: ""
+          },
+          {
+            winner: null,
+            sideA: "Sapphire Flame",
+            sideB: "Amber Hand",
+            bansA: ["McGinnis", "Kelvin"],
+            bansB: ["Vindicta", "Ivy"],
+            heroesA: [],
+            heroesB: [],
+            screenshotVerified: false,
+            duration: "",
+            mvp: ""
+          },
+          {
+            winner: null,
+            sideA: "Amber Hand",
+            sideB: "Sapphire Flame",
+            bansA: [],
+            bansB: [],
+            heroesA: [],
+            heroesB: [],
+            screenshotVerified: false,
+            duration: "",
+            mvp: ""
+          }
+        ]
+      },
+      {
+        id: "grand_final",
+        roundLabel: "Grand Final (BO3)",
+        scheduledTime: "12 Dec 2026 ~05:00 PM SGT",
+        status: "upcoming",
+        streamMode: "Main Stream",
+        teamAId: null,
+        teamBId: null,
+        games: [
+          {
+            winner: null,
+            sideA: "Amber Hand",
+            sideB: "Sapphire Flame",
+            bansA: [],
+            bansB: [],
+            heroesA: [],
+            heroesB: [],
+            screenshotVerified: false,
+            duration: "",
+            mvp: ""
+          },
+          {
+            winner: null,
+            sideA: "Sapphire Flame",
+            sideB: "Amber Hand",
+            bansA: [],
+            bansB: [],
+            heroesA: [],
+            heroesB: [],
+            screenshotVerified: false,
+            duration: "",
+            mvp: ""
+          },
+          {
+            winner: null,
+            sideA: "Amber Hand",
+            sideB: "Sapphire Flame",
+            bansA: [],
+            bansB: [],
+            heroesA: [],
+            heroesB: [],
+            screenshotVerified: false,
+            duration: "",
+            mvp: ""
+          }
+        ]
+      }
+    ];
+
+    // Helper: Series Score Calculation
+    function calcMatchResult(match) {
+      if (!match || !match.games) return { scoreA: 0, scoreB: 0, winner: null, loser: null, isCompleted: false };
+      let scoreA = 0;
+      let scoreB = 0;
+      match.games.forEach(g => {
+        if (g.winner === 'teamA') scoreA++;
+        if (g.winner === 'teamB') scoreB++;
+      });
+
+      let winner = null;
+      let loser = null;
+      if (scoreA >= 2) {
+        winner = match.teamAId;
+        loser = match.teamBId;
+      } else if (scoreB >= 2) {
+        winner = match.teamBId;
+        loser = match.teamAId;
+      }
+
+      return {
+        scoreA,
+        scoreB,
+        winner,
+        loser,
+        isCompleted: scoreA >= 2 || scoreB >= 2
+      };
+    }
+
+    // --- MAIN APP ---
+    function App() {
+      const LOCAL_STORAGE_KEY = 'suzuyun_sanity_deadlock_bo3_cloud_v1';
+
+      const [teams, setTeams] = useState(DEFAULT_TEAMS);
+      const [matches, setMatches] = useState(DEFAULT_MATCHES);
+      
+      const [cloudStatus, setCloudStatus] = useState('connecting'); // 'connecting' | 'cloud' | 'local' | 'saving'
+      const [editingMatch, setEditingMatch] = useState(null);
+      const [toastMsg, setToastMsg] = useState("");
+      const [confirmReset, setConfirmReset] = useState(false);
+      const [showJsonBackup, setShowJsonBackup] = useState(false);
+      const [jsonText, setJsonText] = useState("");
+
+      const cloudSaverRef = useRef(null);
+
+      const showToast = (msg) => {
+        setToastMsg(msg);
+        setTimeout(() => setToastMsg(""), 3200);
+      };
+
+      // Auto-compute bracket progression (advancing winners to Grand Final)
+      const computedMatches = useMemo(() => {
+        const semi1 = matches.find(m => m.id === 'semi_1');
+        const semi2 = matches.find(m => m.id === 'semi_2');
+        const grandFinal = matches.find(m => m.id === 'grand_final');
+
+        const res1 = calcMatchResult(semi1);
+        const res2 = calcMatchResult(semi2);
+
+        return matches.map(m => {
+          if (m.id === 'grand_final') {
+            return {
+              ...m,
+              teamAId: res1.winner || m.teamAId,
+              teamBId: res2.winner || m.teamBId
+            };
+          }
+          return m;
+        });
+      }, [matches]);
+
+      // Calculate Champion Team
+      const championTeam = useMemo(() => {
+        const gf = computedMatches.find(m => m.id === 'grand_final');
+        if (!gf) return null;
+        const resGF = calcMatchResult(gf);
+        if (resGF.winner) {
+          return teams.find(t => t.id === resGF.winner) || null;
+        }
+        return null;
+      }, [computedMatches, teams]);
+
+      // Read from LocalStorage initially
+      useEffect(() => {
+        try {
+          const localSaved = localStorage.getItem(LOCAL_STORAGE_KEY);
+          if (localSaved) {
+            const parsed = JSON.parse(localSaved);
+            if (parsed.teams) setTeams(parsed.teams);
+            if (parsed.matches) setMatches(parsed.matches);
+          }
+        } catch (e) {
+          console.error("Failed to load local data:", e);
+        }
+      }, []);
+
+      // Initialize Firebase Cloud Store
+      useEffect(() => {
+        let isMounted = true;
+
+        async function setupCloud() {
+          if (window.FirebaseStore && window.FirebaseStore.isConfigured) {
+            setCloudStatus('connecting');
+            const handler = await window.FirebaseStore.init(
+              (remoteData) => {
+                if (!isMounted || !remoteData) return;
+                if (remoteData.teams) setTeams(remoteData.teams);
+                if (remoteData.matches) setMatches(remoteData.matches);
+                setCloudStatus('cloud');
+              },
+              (err) => {
+                if (isMounted) setCloudStatus('local');
+              }
+            );
+
+            if (handler) {
+              cloudSaverRef.current = handler.saveState;
+            } else {
+              if (isMounted) setCloudStatus('local');
+            }
+          } else {
+            if (isMounted) setCloudStatus('local');
+          }
+        }
+
+        setupCloud();
+
+        return () => {
+          isMounted = false;
+        };
+      }, []);
+
+      // Persist State helper
+      const persistData = async (newTeams, newMatches) => {
+        setCloudStatus(prev => prev === 'cloud' ? 'saving' : prev);
+        
+        // Always save to LocalStorage fallback
+        try {
+          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify({ teams: newTeams, matches: newMatches }));
+        } catch (err) {
+          console.error("Local storage error:", err);
+        }
+
+        // Save to Firebase Cloud if available
+        if (cloudSaverRef.current) {
+          try {
+            await cloudSaverRef.current({ teams: newTeams, matches: newMatches, updatedAt: Date.now() });
+            setCloudStatus('cloud');
+          } catch (err) {
+            console.error("Failed to write to Firebase Cloud:", err);
+            setCloudStatus('local');
+          }
+        } else {
+          setCloudStatus('local');
+        }
+      };
+
+      // Handler for saving a Team
+      const handleUpdateTeam = async (updatedTeam) => {
+        const nextTeams = teams.map(t => t.id === updatedTeam.id ? updatedTeam : t);
+        setTeams(nextTeams);
+        await persistData(nextTeams, matches);
+        showToast(`✅ Saved ${updatedTeam.name} roster & streamer details!`);
+      };
+
+      // Handler for saving a Match
+      const handleSaveMatch = async (updatedMatch) => {
+        const res = calcMatchResult(updatedMatch);
+        const finalStatus = res.isCompleted ? 'completed' : updatedMatch.status;
+
+        const nextMatches = matches.map(m => m.id === updatedMatch.id ? { ...updatedMatch, status: finalStatus } : m);
+        setMatches(nextMatches);
+        setEditingMatch(null);
+        await persistData(teams, nextMatches);
+        showToast(`🏆 Saved results & bans for ${updatedMatch.roundLabel}!`);
+      };
+
+      // Reset to Default Setup
+      const handleResetDemoData = async () => {
+        if (!confirmReset) {
+          setConfirmReset(true);
+          setTimeout(() => setConfirmReset(false), 4000);
+          return;
+        }
+        setTeams(DEFAULT_TEAMS);
+        setMatches(DEFAULT_MATCHES);
+        setConfirmReset(false);
+        await persistData(DEFAULT_TEAMS, DEFAULT_MATCHES);
+        showToast("🔄 Tournament setup has been reset to default!");
+      };
+
+      // JSON Backup handlers
+      const handleOpenJsonBackup = () => {
+        setJsonText(JSON.stringify({ teams, matches }, null, 2));
+        setShowJsonBackup(true);
+      };
+
+      const handleImportJson = async () => {
+        try {
+          const parsed = JSON.parse(jsonText);
+          if (parsed.teams && parsed.matches) {
+            setTeams(parsed.teams);
+            setMatches(parsed.matches);
+            await persistData(parsed.teams, parsed.matches);
+            setShowJsonBackup(false);
+            showToast("📥 Tournament data imported successfully!");
+          } else {
+            showToast("❌ Invalid JSON format. Must contain 'teams' and 'matches'.");
+          }
+        } catch (err) {
+          showToast("❌ Error parsing JSON string.");
+        }
+      };
+
+      const semi1 = computedMatches.find(m => m.id === 'semi_1');
+      const semi2 = computedMatches.find(m => m.id === 'semi_2');
+      const grandFinal = computedMatches.find(m => m.id === 'grand_final');
+
+      return (
+        <div class="min-h-screen text-slate-200 flex flex-col">
+          
+          {/* TOAST NOTIFICATION */}
+          {toastMsg && (
+            <div class="fixed bottom-5 right-5 z-50 bg-brass-500 text-obsidian-950 font-bold px-4 py-3 rounded-lg shadow-2xl flex items-center gap-2 border border-yellow-200 animate-bounce">
+              <span>✨</span>
+              <span>{toastMsg}</span>
+            </div>
+          )}
+
+          {/* HEADER & NAV */}
+          <header class="bg-obsidian-900 border-b border-brass-500/30 sticky top-0 z-30 shadow-2xl backdrop-blur-md bg-opacity-95">
+            <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
+              
+              {/* Title & Badge */}
+              <div class="flex items-center gap-3">
+                <div class="w-11 h-11 rounded border-2 border-brass-400 bg-obsidian-800 flex items-center justify-center text-brass-400 font-black text-2xl shadow-[0_0_15px_rgba(212,175,55,0.3)]">
+                  🧠
+                </div>
+                <div>
+                  <h1 class="font-deco font-black text-xl md:text-2xl brass-gradient-text tracking-wide uppercase">
+                    SUZUYUN'S SANITY
+                  </h1>
+                  <div class="flex flex-wrap items-center gap-2 text-xs text-slate-400 font-mono">
+                    <span class="bg-brass-500/10 border border-brass-500/40 text-brass-300 px-2 py-0.5 rounded font-bold uppercase">
+                      DEADLOCK 4-TEAM BO3
+                    </span>
+                    <span>•</span>
+                    <span class="text-emerald-400 font-semibold">$60 SGD Winner Takes All</span>
+                    <span>•</span>
+                    <span class="text-amber-400 font-semibold">Singapore Server</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Smooth-Scroll Section Links */}
+              <nav class="flex flex-wrap items-center bg-obsidian-950 p-1 rounded-lg border border-brass-500/20 gap-1">
+                <a href="#bracket" class="px-3 py-1.5 rounded-md font-semibold text-xs sm:text-sm text-slate-200 hover:text-obsidian-950 hover:bg-brass-500 transition">
+                  🏆 Bracket
+                </a>
+                <a href="#schedule" class="px-3 py-1.5 rounded-md font-semibold text-xs sm:text-sm text-slate-200 hover:text-obsidian-950 hover:bg-brass-500 transition">
+                  ⏰ Schedule
+                </a>
+                <a href="#teams" class="px-3 py-1.5 rounded-md font-semibold text-xs sm:text-sm text-slate-200 hover:text-obsidian-950 hover:bg-brass-500 transition">
+                  🛡️ Teams & Rosters
+                </a>
+                <a href="#rules" class="px-3 py-1.5 rounded-md font-semibold text-xs sm:text-sm text-slate-200 hover:text-obsidian-950 hover:bg-brass-500 transition">
+                  📜 Rules
+                </a>
+              </nav>
+
+              {/* Sync Status & Action Buttons */}
+              <div class="flex items-center gap-2">
+                {/* Cloud Status Indicator */}
+                <span class={`text-[11px] px-2.5 py-1 rounded-full font-mono font-bold flex items-center gap-1 border ${
+                  cloudStatus === 'cloud'
+                    ? "bg-emerald-950/80 text-emerald-300 border-emerald-600/50"
+                    : cloudStatus === 'saving'
+                    ? "bg-amber-950/80 text-amber-300 border-amber-600/50 animate-pulse"
+                    : cloudStatus === 'connecting'
+                    ? "bg-blue-950/80 text-blue-300 border-blue-600/50 animate-pulse"
+                    : "bg-slate-900 text-slate-400 border-slate-700"
+                }`}>
+                  <span class={`w-2 h-2 rounded-full ${
+                    cloudStatus === 'cloud' ? 'bg-emerald-400' : cloudStatus === 'saving' ? 'bg-amber-400' : 'bg-slate-400'
+                  }`}></span>
+                  {cloudStatus === 'cloud' && 'Live Cloud Sync'}
+                  {cloudStatus === 'saving' && 'Saving Cloud...'}
+                  {cloudStatus === 'connecting' && 'Connecting...'}
+                  {cloudStatus === 'local' && 'Saved Locally'}
+                </span>
+
+                <button
+                  onClick={handleOpenJsonBackup}
+                  class="bg-obsidian-800 hover:bg-obsidian-700 text-slate-300 border border-slate-700 px-3 py-1.5 rounded text-xs font-semibold transition"
+                  title="Export or Import JSON Data"
+                >
+                  💾 Backup / JSON
+                </button>
+
+                <button
+                  onClick={handleResetDemoData}
+                  class={`px-3 py-1.5 rounded text-xs font-semibold transition border ${
+                    confirmReset
+                      ? "bg-red-600 hover:bg-red-500 text-white border-red-400"
+                      : "bg-red-950/40 hover:bg-red-900/60 text-red-300 border-red-800/50"
+                  }`}
+                >
+                  {confirmReset ? "⚠️ Click to Reset" : "🔄 Reset"}
+                </button>
+              </div>
+
+            </div>
+          </header>
+
+          {/* EVENT BANNER STRIP */}
+          <div class="bg-obsidian-950 border-b border-obsidian-800 py-2 px-4 text-xs font-mono text-center text-slate-300 flex flex-wrap items-center justify-center gap-4">
+            <span>📅 <strong class="text-brass-400">Date:</strong> 12 Dec 2026</span>
+            <span>•</span>
+            <span>⏰ <strong class="text-brass-400">Time:</strong> 02:00 PM – ~08:00 PM SGT</span>
+            <span>•</span>
+            <span class="text-amber-300">📺 <strong>Stream Rule:</strong> 1 Streamer per team required</span>
+            <span>•</span>
+            <span class="text-sapphire-400">🚫 <strong>Series Rule:</strong> No Repeat Heroes per team</span>
+          </div>
+
+          {/* MAIN CONTENT AREA */}
+          <main class="flex-grow max-w-7xl w-full mx-auto p-4 md:p-6 space-y-12">
+
+            {/* CHAMPION BANNER */}
+            {championTeam && (
+              <div class="relative overflow-hidden rounded-xl border-2 border-brass-400 bg-gradient-to-r from-obsidian-900 via-amber-950/40 to-obsidian-900 p-6 shadow-[0_0_40px_rgba(212,175,55,0.35)]">
+                <div class="flex flex-col md:flex-row items-center justify-between gap-6">
+                  <div class="flex items-center gap-5">
+                    <div class="w-16 h-16 rounded-full bg-brass-500 text-obsidian-950 flex items-center justify-center font-black text-3xl shadow-[0_0_20px_rgba(212,175,55,0.6)]">
+                      👑
+                    </div>
+                    <div>
+                      <div class="text-xs uppercase font-extrabold tracking-widest text-brass-400 mb-1">
+                        TOURNAMENT CHAMPIONS OF SUZUYUN'S SANITY
+                      </div>
+                      <h2 class="text-3xl font-deco font-black text-white flex items-center gap-3">
+                        <span>{championTeam.name}</span>
+                        <span class="text-sm bg-brass-500/20 border border-brass-400 text-brass-300 px-2 py-0.5 rounded font-mono">
+                          [{championTeam.tag}]
+                        </span>
+                      </h2>
+                      <p class="text-amber-300 text-xs mt-1 font-semibold">
+                        🏆 Winner Takes All: $60 SGD
+                      </p>
+                    </div>
+                  </div>
+
+                  <div class="flex flex-wrap gap-2 justify-center">
+                    {championTeam.roster.map(player => (
+                      <div key={player.id} class="bg-obsidian-800/90 border border-brass-500/30 px-3 py-1.5 rounded text-xs flex items-center gap-1.5">
+                        <span class="text-brass-400 font-bold">{player.name}</span>
+                        <span class="text-slate-400">({player.hero})</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* SECTION 1: SINGLE-ELIMINATION BRACKET */}
+            <section id="bracket" class="space-y-6">
+              <div class="bg-obsidian-900/90 border border-obsidian-700 p-4 rounded-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                <div>
+                  <h2 class="text-xl font-deco font-bold text-brass-400 flex items-center gap-2">
+                    <span>🏆 Tournament Bracket (Single Elimination • BO3 &gt; BO3)</span>
+                  </h2>
+                  <p class="text-xs text-slate-400 mt-0.5">
+                    No Losers Bracket — Semifinal 1 (T1 vs T2) &amp; Semifinal 2 (T3 vs T4) winners advance directly to the Grand Final. Click any match card to update scores, hero bans &amp; screenshot verification.
+                  </p>
+                </div>
+                <div class="text-xs bg-amber-950/40 border border-amber-800/60 text-amber-300 p-2.5 rounded-lg max-w-md">
+                  💡 <strong>Stream Note:</strong> Semifinal 2 runs off-stream simultaneously during Round 1 to save time.
+                </div>
+              </div>
+
+              {/* Bracket Tree Visual */}
+              <div class="bg-obsidian-900/60 border border-brass-500/20 rounded-2xl p-4 sm:p-6 md:p-8 shadow-2xl">
+                <div class="grid grid-cols-1 lg:grid-cols-[1fr_72px_1fr] items-center gap-6 lg:gap-0">
+                  
+                  {/* LEFT COLUMN: SEMIFINALS */}
+                  <div class="space-y-6">
+                    <div class="border-b border-brass-500/30 pb-2 flex items-center justify-between">
+                      <h3 class="font-deco font-bold text-brass-400 text-sm tracking-wider uppercase">
+                        ⚔️ Semifinals (BO3)
+                      </h3>
+                      <span class="text-xs text-slate-400 font-mono">T1 vs T2 • T3 vs T4</span>
+                    </div>
+
+                    <div class="space-y-6">
+                      <BracketMatchCard match={semi1} teams={teams} onEdit={setEditingMatch} />
+                      <BracketMatchCard match={semi2} teams={teams} onEdit={setEditingMatch} />
+                    </div>
+                  </div>
+
+                  {/* MIDDLE COLUMN: BRASS CONNECTOR LINES */}
+                  <div class="hidden lg:flex flex-col items-center justify-center h-full pt-8">
+                    <svg class="w-full h-72 overflow-visible" viewBox="0 0 72 280" fill="none">
+                      <path d="M 0 65 H 36 V 140 H 72" stroke="#d4af37" stroke-width="2.5" stroke-opacity="0.7" />
+                      <path d="M 0 215 H 36 V 140 H 72" stroke="#d4af37" stroke-width="2.5" stroke-opacity="0.7" />
+                      <circle cx="36" cy="140" r="4.5" fill="#e5c158" />
+                      <polygon points="65,134 73,140 65,146" fill="#e5c158" />
+                    </svg>
+                  </div>
+
+                  {/* RIGHT COLUMN: GRAND FINAL */}
+                  <div class="space-y-4">
+                    <div class="border-b border-brass-500/30 pb-2 flex items-center justify-between">
+                      <h3 class="font-deco font-bold text-brass-400 text-sm tracking-wider uppercase">
+                        👑 Grand Final (BO3)
+                      </h3>
+                      <span class="text-xs text-emerald-400 font-bold">$60 SGD Winner Takes All</span>
+                    </div>
+
+                    <BracketMatchCard match={grandFinal} teams={teams} isGrandFinal={true} onEdit={setEditingMatch} />
+                  </div>
+
+                </div>
+              </div>
+            </section>
+
+            {/* SECTION 2: TOURNAMENT SCHEDULE */}
+            <section id="schedule" class="space-y-4">
+              <div class="bg-obsidian-900 border border-brass-500/30 rounded-xl p-6 shadow-xl space-y-5">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-obsidian-700 pb-3">
+                  <div>
+                    <h2 class="text-xl font-deco font-bold text-brass-400">
+                      ⏰ Tournament Schedule (12 December 2026)
+                    </h2>
+                    <p class="text-xs text-slate-400 mt-0.5">
+                      All times in Singapore Time (SGT). Estimated 02:00 PM to ~08:00 PM.
+                    </p>
+                  </div>
+                  <span class="text-xs font-mono bg-obsidian-950 border border-brass-500/30 text-brass-300 px-3 py-1 rounded self-start sm:self-auto">
+                    🌏 Server: Singapore
+                  </span>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Slot 1: Semi 1 */}
+                  <div
+                    onClick={() => setEditingMatch(semi1)}
+                    class="bg-obsidian-950 border border-obsidian-700 hover:border-brass-400 rounded-lg p-4 cursor-pointer transition space-y-2"
+                  >
+                    <div class="flex items-center justify-between text-xs">
+                      <span class="font-mono font-bold text-brass-400">02:00 PM SGT</span>
+                      <span class="bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded text-[10px] font-bold">
+                        📺 Main Stream
+                      </span>
+                    </div>
+                    <div class="font-deco font-bold text-white text-sm">Semifinal 1 — BO3</div>
+                    <div class="text-xs text-slate-300 font-semibold">
+                      {(teams[0] && teams[0].name) || "T1"} <span class="text-brass-400">vs</span> {(teams[1] && teams[1].name) || "T2"}
+                    </div>
+                    <div class="text-[11px] text-slate-400 pt-1 border-t border-obsidian-800 flex items-center justify-between">
+                      <span>Winner → Grand Final</span>
+                      <StatusBadge status={semi1 ? semi1.status : "upcoming"} />
+                    </div>
+                  </div>
+
+                  {/* Slot 2: Semi 2 */}
+                  <div
+                    onClick={() => setEditingMatch(semi2)}
+                    class="bg-obsidian-950 border border-obsidian-700 hover:border-brass-400 rounded-lg p-4 cursor-pointer transition space-y-2"
+                  >
+                    <div class="flex items-center justify-between text-xs">
+                      <span class="font-mono font-bold text-brass-400">02:00 PM SGT</span>
+                      <span class="bg-slate-800 text-slate-300 border border-slate-700 px-2 py-0.5 rounded text-[10px] font-bold">
+                        🎬 Off-Stream
+                      </span>
+                    </div>
+                    <div class="font-deco font-bold text-white text-sm">Semifinal 2 — BO3</div>
+                    <div class="text-xs text-slate-300 font-semibold">
+                      {(teams[2] && teams[2].name) || "T3"} <span class="text-brass-400">vs</span> {(teams[3] && teams[3].name) || "T4"}
+                    </div>
+                    <div class="text-[11px] text-slate-400 pt-1 border-t border-obsidian-800 flex items-center justify-between">
+                      <span>Played concurrently (POV streams)</span>
+                      <StatusBadge status={semi2 ? semi2.status : "upcoming"} />
+                    </div>
+                  </div>
+
+                  {/* Slot 3: Grand Final */}
+                  <div
+                    onClick={() => setEditingMatch(grandFinal)}
+                    class="bg-obsidian-950 border border-brass-500/40 hover:border-brass-300 rounded-lg p-4 cursor-pointer transition space-y-2 bg-gradient-to-br from-obsidian-950 to-amber-950/20"
+                  >
+                    <div class="flex items-center justify-between text-xs">
+                      <span class="font-mono font-bold text-brass-400">~05:00 PM – 08:00 PM SGT</span>
+                      <span class="bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded text-[10px] font-bold">
+                        📺 Main Stream
+                      </span>
+                    </div>
+                    <div class="font-deco font-bold text-brass-300 text-sm">👑 Grand Final — BO3</div>
+                    <div class="text-xs text-slate-300 font-semibold">
+                      Winner SF1 <span class="text-brass-400">vs</span> Winner SF2
+                    </div>
+                    <div class="text-[11px] text-emerald-400 pt-1 border-t border-obsidian-800 flex items-center justify-between">
+                      <span>Winner takes $60 SGD</span>
+                      <StatusBadge status={grandFinal ? grandFinal.status : "upcoming"} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* SECTION 3: TEAMS & ROSTERS */}
+            <section id="teams" class="space-y-6">
+              <div class="bg-obsidian-900 p-4 rounded-xl border border-obsidian-700 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                <div>
+                  <h2 class="text-xl font-deco font-bold text-brass-400">
+                    🛡️ Teams, 6v6 Rosters &amp; Streamers
+                  </h2>
+                  <p class="text-xs text-slate-400 mt-1">
+                    Requirement: Each team MUST have at least 1 player streaming their POV live. Edit rosters and click "Save Team".
+                  </p>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {teams.map(team => (
+                  <TeamCardEditor key={team.id} team={team} onUpdate={handleUpdateTeam} />
+                ))}
+              </div>
+            </section>
+
+            {/* SECTION 4: OFFICIAL RULES */}
+            <section id="rules" class="space-y-6">
+              <div class="bg-obsidian-900 border border-brass-500/40 rounded-xl p-6 relative overflow-hidden shadow-2xl">
+                <h2 class="text-2xl font-deco font-black text-brass-400 mb-2">
+                  📜 SUZUYUN'S SANITY TOURNAMENT DEADLOCK RULES
+                </h2>
+                <p class="text-xs text-slate-400 mb-6 border-b border-obsidian-700 pb-3">
+                  Official ruleset and guidelines for all participating teams and players.
+                </p>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  
+                  {/* Card 1: Schedule */}
+                  <div class="bg-obsidian-950 p-4 rounded-lg border border-obsidian-700 space-y-2">
+                    <div class="flex items-center gap-2 text-brass-400 font-bold text-sm border-b border-obsidian-800 pb-2">
+                      <span>⏰ Schedule &amp; Duration</span>
+                    </div>
+                    <ul class="text-xs text-slate-300 space-y-1.5 list-disc list-inside leading-relaxed">
+                      <li><strong>Date:</strong> 12 December 2026</li>
+                      <li><strong>Start Time:</strong> 02:00 PM SGT</li>
+                      <li><strong>Estimated End:</strong> ~08:00 PM SGT (longest estimate; may end earlier).</li>
+                    </ul>
+                  </div>
+
+                  {/* Card 2: Format & Prizepool */}
+                  <div class="bg-obsidian-950 p-4 rounded-lg border border-obsidian-700 space-y-2">
+                    <div class="flex items-center gap-2 text-brass-400 font-bold text-sm border-b border-obsidian-800 pb-2">
+                      <span>💰 Format &amp; Prizepool</span>
+                    </div>
+                    <ul class="text-xs text-slate-300 space-y-1.5 list-disc list-inside leading-relaxed">
+                      <li><strong>Format:</strong> Single Elimination BO3 &gt; BO3 (T1 vs T2, T3 vs T4 — no losers bracket).</li>
+                      <li><strong>Winners:</strong> Advance directly to BO3 Grand Final.</li>
+                      <li><strong>Prizepool:</strong> <span class="text-emerald-400 font-bold">$60 SGD</span> (Winner takes all).</li>
+                      <li><strong>Server Hosted:</strong> Singapore</li>
+                    </ul>
+                  </div>
+
+                  {/* Card 3: Streaming Requirements */}
+                  <div class="bg-obsidian-950 p-4 rounded-lg border border-obsidian-700 space-y-2">
+                    <div class="flex items-center gap-2 text-brass-400 font-bold text-sm border-b border-obsidian-800 pb-2">
+                      <span>📺 Streaming Rules</span>
+                    </div>
+                    <ul class="text-xs text-slate-300 space-y-1.5 list-disc list-inside leading-relaxed">
+                      <li><strong>Off-Stream Match:</strong> First round, one match will not be shown on main stream to save time.</li>
+                      <li><strong>Mandatory Streamer:</strong> <strong>Each team is required to have at least 1 streamer streaming the game</strong> live.</li>
+                    </ul>
+                  </div>
+
+                  {/* Card 4: Match Verification & Screenshots */}
+                  <div class="bg-obsidian-950 p-4 rounded-lg border border-obsidian-700 space-y-2">
+                    <div class="flex items-center gap-2 text-brass-400 font-bold text-sm border-b border-obsidian-800 pb-2">
+                      <span>📸 Screenshot Verification</span>
+                    </div>
+                    <p class="text-xs text-slate-300 leading-relaxed">
+                      At the end of each game, a screenshot of the end game screen <strong>will be needed to verify match results</strong>.
+                    </p>
+                  </div>
+
+                  {/* Card 5: Hero Bans */}
+                  <div class="bg-obsidian-950 p-4 rounded-lg border border-obsidian-700 space-y-2">
+                    <div class="flex items-center gap-2 text-brass-400 font-bold text-sm border-b border-obsidian-800 pb-2">
+                      <span>🚫 Hero Bans (4 Bans Total)</span>
+                    </div>
+                    <p class="text-xs text-slate-300 leading-relaxed">
+                      Each team is allowed to submit <strong>2 bans per game</strong>. Meaning a total of <strong>4 bans per game</strong>.
+                    </p>
+                  </div>
+
+                  {/* Card 6: No Repeat Heroes Rule */}
+                  <div class="bg-obsidian-950 p-4 rounded-lg border border-brass-500/40 space-y-2 bg-gradient-to-r from-obsidian-950 to-amber-950/20">
+                    <div class="flex items-center gap-2 text-amber-400 font-bold text-sm border-b border-obsidian-800 pb-2">
+                      <span>🔄 Series Hero Lock (No Repeats)</span>
+                    </div>
+                    <ul class="text-xs text-slate-300 space-y-1.5 list-disc list-inside leading-relaxed">
+                      <li>You <strong>cannot run the same characters</strong> you ran in earlier games of the series.</li>
+                      <li>Meaning <strong>no same hero lineups for each team</strong> across a series.</li>
+                      <li>You may only play each hero <strong>once per series for each team</strong>.</li>
+                    </ul>
+                  </div>
+
+                </div>
+              </div>
+            </section>
+
+          </main>
+
+          {/* MATCH EDITOR MODAL */}
+          {editingMatch && (
+            <MatchEditorModal
+              match={editingMatch}
+              teams={teams}
+              onClose={() => setEditingMatch(null)}
+              onSave={handleSaveMatch}
+            />
+          )}
+
+          {/* JSON BACKUP / IMPORT MODAL */}
+          {showJsonBackup && (
+            <div class="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+              <div class="bg-obsidian-900 border border-brass-400 rounded-xl max-w-2xl w-full p-6 space-y-4 shadow-2xl relative">
+                <div class="flex items-center justify-between border-b border-obsidian-700 pb-2">
+                  <h3 class="font-deco font-bold text-brass-400 text-lg">💾 Tournament JSON Backup &amp; Restore</h3>
+                  <button onClick={() => setShowJsonBackup(false)} class="text-slate-400 hover:text-white font-bold">✕</button>
+                </div>
+                <p class="text-xs text-slate-400">
+                  Copy this JSON to backup your setup, or paste a saved JSON snippet below and click Import.
+                </p>
+                <textarea
+                  value={jsonText}
+                  onChange={(e) => setJsonText(e.target.value)}
+                  rows="12"
+                  class="w-full bg-obsidian-950 text-slate-200 font-mono text-xs p-3 rounded border border-obsidian-700 focus:border-brass-400 focus:outline-none"
+                ></textarea>
+                <div class="flex items-center justify-end gap-3">
+                  <button onClick={() => setShowJsonBackup(false)} class="px-4 py-2 bg-obsidian-800 text-xs rounded font-semibold">Cancel</button>
+                  <button onClick={handleImportJson} class="px-4 py-2 bg-brass-500 text-obsidian-950 font-bold text-xs rounded hover:bg-brass-400">
+                    Import JSON Data
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* FOOTER */}
+          <footer class="bg-obsidian-900 border-t border-brass-500/20 py-4 text-center text-xs text-slate-500 mt-auto">
+            <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+              <div>SUZUYUN'S SANITY TOURNAMENT • DEADLOCK 6V6 • SINGAPORE SERVER</div>
+              <div class="text-brass-400 font-serif">BO3 &gt; BO3 • $60 SGD WINNER TAKES ALL</div>
+            </div>
+          </footer>
+
+        </div>
+      );
+    }
+
+    // --- BRACKET MATCH CARD ---
+    function BracketMatchCard({ match, teams, isGrandFinal = false, onEdit }) {
+      if (!match) return null;
+
+      const teamA = teams.find(t => t.id === match.teamAId);
+      const teamB = teams.find(t => t.id === match.teamBId);
+      const res = calcMatchResult(match);
+
+      return (
+        <div
+          onClick={() => onEdit(match)}
+          class={`relative rounded-xl border transition cursor-pointer overflow-hidden group ${
+            isGrandFinal
+              ? "bg-gradient-to-br from-obsidian-900 via-amber-950/20 to-obsidian-900 border-brass-400 hover:shadow-[0_0_30px_rgba(212,175,55,0.35)]"
+              : "bg-obsidian-900/90 border-brass-500/30 hover:border-brass-400 hover:shadow-[0_0_18px_rgba(212,175,55,0.2)]"
+          }`}
+        >
+          {/* Header Bar */}
+          <div class="bg-obsidian-950/90 px-4 py-2 flex items-center justify-between border-b border-obsidian-800 text-xs">
+            <span class="font-deco font-bold text-brass-400 tracking-wider flex items-center gap-1.5">
+              {match.roundLabel}
+            </span>
+            <div class="flex items-center gap-2">
+              <span class={`text-[10px] px-2 py-0.5 rounded font-mono font-bold ${
+                match.streamMode.includes("Off-Stream") 
+                  ? "bg-slate-800 text-slate-400 border border-slate-700" 
+                  : "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+              }`}>
+                {match.streamMode.includes("Off-Stream") ? "🎬 Off-Stream" : "📺 Main Stream"}
+              </span>
+              <StatusBadge status={match.status} />
+            </div>
+          </div>
+
+          {/* Teams Rows */}
+          <div class="p-4 space-y-3">
+            {/* Team A */}
+            <div class={`flex items-center justify-between p-2.5 rounded transition ${
+              res.winner === match.teamAId ? "bg-brass-500/10 border border-brass-500/30 font-bold" : "bg-obsidian-800/40"
+            }`}>
+              <div class="flex items-center gap-3">
+                <span class="text-[10px] bg-obsidian-950 text-slate-400 px-1.5 py-0.5 rounded border border-slate-700 font-mono">
+                  #{teamA ? teamA.seed : "?"}
+                </span>
+                <div>
+                  <div class={`text-sm font-semibold ${res.winner === match.teamAId ? "text-brass-300" : teamA ? "text-slate-100" : "text-slate-500 italic"}`}>
+                    {teamA ? teamA.name : "TBD"}
+                  </div>
+                  {teamA && teamA.streamer && (
+                    <div class="text-[10px] text-amber-400/80 font-mono flex items-center gap-1">
+                      📡 {teamA.streamer}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div class="flex items-center gap-3">
+                <div class="flex items-center gap-1">
+                  {match.games.map((g, idx) => (
+                    <span
+                      key={idx}
+                      class={`w-2.5 h-2.5 rounded-full ${
+                        g.winner === 'teamA' ? 'bg-amber-400 shadow-[0_0_6px_rgba(245,158,11,0.8)]' : 'bg-obsidian-700'
+                      }`}
+                    ></span>
+                  ))}
+                </div>
+                <span class={`text-base font-extrabold font-mono w-6 text-right ${res.winner === match.teamAId ? "text-brass-400" : "text-slate-300"}`}>
+                  {res.scoreA}
+                </span>
+              </div>
+            </div>
+
+            {/* Team B */}
+            <div class={`flex items-center justify-between p-2.5 rounded transition ${
+              res.winner === match.teamBId ? "bg-brass-500/10 border border-brass-500/30 font-bold" : "bg-obsidian-800/40"
+            }`}>
+              <div class="flex items-center gap-3">
+                <span class="text-[10px] bg-obsidian-950 text-slate-400 px-1.5 py-0.5 rounded border border-slate-700 font-mono">
+                  #{teamB ? teamB.seed : "?"}
+                </span>
+                <div>
+                  <div class={`text-sm font-semibold ${res.winner === match.teamBId ? "text-brass-300" : teamB ? "text-slate-100" : "text-slate-500 italic"}`}>
+                    {teamB ? teamB.name : "TBD"}
+                  </div>
+                  {teamB && teamB.streamer && (
+                    <div class="text-[10px] text-amber-400/80 font-mono flex items-center gap-1">
+                      📡 {teamB.streamer}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div class="flex items-center gap-3">
+                <div class="flex items-center gap-1">
+                  {match.games.map((g, idx) => (
+                    <span
+                      key={idx}
+                      class={`w-2.5 h-2.5 rounded-full ${
+                        g.winner === 'teamB' ? 'bg-sapphire-400 shadow-[0_0_6px_rgba(56,189,248,0.8)]' : 'bg-obsidian-700'
+                      }`}
+                    ></span>
+                  ))}
+                </div>
+                <span class={`text-base font-extrabold font-mono w-6 text-right ${res.winner === match.teamBId ? "text-brass-400" : "text-slate-300"}`}>
+                  {res.scoreB}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="bg-obsidian-950/60 px-4 py-1.5 text-center text-[10px] text-slate-400 group-hover:text-brass-400 transition border-t border-obsidian-800 flex items-center justify-between">
+            <span>📸 Verified Screenshots: {match.games.filter(g => g.screenshotVerified).length}/{match.games.length}</span>
+            <span>Click to Edit Score &amp; Bans ✎</span>
+          </div>
+        </div>
+      );
+    }
+
+    function StatusBadge({ status }) {
+      if (status === 'live') {
+        return (
+          <span class="bg-red-500/20 text-red-400 border border-red-500/40 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider animate-pulse flex items-center gap-1">
+            <span class="w-1.5 h-1.5 rounded-full bg-red-400"></span> LIVE
+          </span>
+        );
+      }
+      if (status === 'completed') {
+        return (
+          <span class="bg-brass-500/20 text-brass-300 border border-brass-500/40 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider">
+            ✓ ENDED
+          </span>
+        );
+      }
+      return (
+        <span class="bg-slate-800 text-slate-400 border border-slate-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider">
+          UPCOMING
+        </span>
+      );
+    }
+
+    // --- TEAM CARD EDITOR ---
+    function TeamCardEditor({ team, onUpdate }) {
+      const [name, setName] = useState(team.name);
+      const [tag, setTag] = useState(team.tag);
+      const [streamer, setStreamer] = useState(team.streamer || "");
+      const [roster, setRoster] = useState(team.roster);
+
+      const handlePlayerChange = (index, field, value) => {
+        const updated = [...roster];
+        updated[index] = { ...updated[index], [field]: value };
+        setRoster(updated);
+      };
+
+      const handleSave = () => {
+        onUpdate({
+          ...team,
+          name,
+          tag,
+          streamer,
+          roster
+        });
+      };
+
+      return (
+        <div class="bg-obsidian-900 border border-brass-500/30 rounded-xl p-5 space-y-4 shadow-xl">
+          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-obsidian-700 pb-3">
+            <div class="flex items-center gap-3">
+              <span class="w-8 h-8 rounded bg-brass-500/20 border border-brass-400 text-brass-300 font-black flex items-center justify-center text-sm font-mono">
+                #{team.seed}
+              </span>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                class="font-deco font-bold text-white bg-obsidian-950 px-2 py-1 rounded border border-obsidian-700 focus:border-brass-400 text-sm focus:outline-none"
+                placeholder="Team Name"
+              />
+            </div>
+
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-slate-400 font-mono">TAG:</span>
+              <input
+                type="text"
+                value={tag}
+                onChange={(e) => setTag(e.target.value.toUpperCase())}
+                maxLength="5"
+                class="w-14 font-mono font-bold text-amber-300 bg-obsidian-950 px-2 py-1 rounded border border-obsidian-700 text-xs focus:border-brass-400 uppercase text-center focus:outline-none"
+              />
+              <button
+                onClick={handleSave}
+                class="bg-brass-500 hover:bg-brass-400 text-obsidian-950 font-bold text-xs px-3 py-1.5 rounded shadow transition"
+              >
+                💾 Save Team
+              </button>
+            </div>
+          </div>
+
+          <div class="bg-amber-950/30 border border-amber-800/40 p-2.5 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs">
+            <span class="font-semibold text-amber-300 flex items-center gap-1">
+              📡 Designated Team Streamer (Required):
+            </span>
+            <input
+              type="text"
+              value={streamer}
+              onChange={(e) => setStreamer(e.target.value)}
+              placeholder="twitch.tv/streamerhandle"
+              class="w-full sm:w-64 bg-obsidian-950 text-slate-200 px-2 py-1 rounded border border-obsidian-700 focus:border-amber-400 focus:outline-none font-mono"
+            />
+          </div>
+
+          <div>
+            <div class="text-xs font-bold text-brass-400 uppercase mb-2 flex items-center justify-between">
+              <span>6v6 Roster Lineup</span>
+              <span class="text-[10px] text-slate-400">Player Handle &amp; Hero</span>
+            </div>
+
+            <div class="space-y-2">
+              {roster.map((player, idx) => (
+                <div key={player.id} class="flex items-center gap-2 bg-obsidian-950/70 p-2 rounded border border-obsidian-800 text-xs">
+                  <span class="text-slate-500 font-mono w-4">{idx + 1}.</span>
+                  <input
+                    type="text"
+                    value={player.name}
+                    onChange={(e) => handlePlayerChange(idx, "name", e.target.value)}
+                    class="bg-obsidian-900 text-slate-200 px-2 py-1 rounded border border-obsidian-700 w-1/3 focus:border-brass-400 focus:outline-none"
+                    placeholder="Player Handle"
+                  />
+                  <select
+                    value={player.hero}
+                    onChange={(e) => handlePlayerChange(idx, "hero", e.target.value)}
+                    class="bg-obsidian-900 text-amber-300 px-2 py-1 rounded border border-obsidian-700 w-1/3 focus:border-brass-400 focus:outline-none"
+                  >
+                    {HEROES.map(h => (
+                      <option key={h.id} value={h.name}>{h.icon} {h.name}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="text"
+                    value={player.role}
+                    onChange={(e) => handlePlayerChange(idx, "role", e.target.value)}
+                    class="bg-obsidian-900 text-slate-400 px-2 py-1 rounded border border-obsidian-700 w-1/3 focus:border-brass-400 focus:outline-none"
+                    placeholder="Role"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // --- MATCH EDITOR MODAL WITH NO REPEAT HERO LOCK TRACKER ---
+    function MatchEditorModal({ match, teams, onClose, onSave }) {
+      const [currentMatch, setCurrentMatch] = useState(JSON.parse(JSON.stringify(match)));
+      const teamA = teams.find(t => t.id === currentMatch.teamAId);
+      const teamB = teams.find(t => t.id === currentMatch.teamBId);
+
+      const res = calcMatchResult(currentMatch);
+
+      const handleGameUpdate = (gameIdx, field, val) => {
+        const updatedGames = [...currentMatch.games];
+        updatedGames[gameIdx] = { ...updatedGames[gameIdx], [field]: val };
+        setCurrentMatch({ ...currentMatch, games: updatedGames });
+      };
+
+      const handleBanChange = (gameIdx, teamKey, banIdx, heroName) => {
+        const updatedGames = [...currentMatch.games];
+        const bansField = teamKey === 'A' ? 'bansA' : 'bansB';
+        const currentBans = [...(updatedGames[gameIdx][bansField] || ["", ""])];
+        currentBans[banIdx] = heroName;
+        updatedGames[gameIdx][bansField] = currentBans;
+        setCurrentMatch({ ...currentMatch, games: updatedGames });
+      };
+
+      // Track played heroes across series to detect duplicates (No Repeat Hero Rule)
+      const seriesHeroUsageA = useMemo(() => {
+        const list = [];
+        currentMatch.games.forEach(g => {
+          if (g.heroesA) list.push(...g.heroesA);
+        });
+        return list;
+      }, [currentMatch]);
+
+      const seriesHeroUsageB = useMemo(() => {
+        const list = [];
+        currentMatch.games.forEach(g => {
+          if (g.heroesB) list.push(...g.heroesB);
+        });
+        return list;
+      }, [currentMatch]);
+
+      return (
+        <div class="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+          <div class="bg-obsidian-900 border border-brass-400 rounded-xl max-w-4xl w-full p-6 space-y-6 shadow-2xl my-8 relative">
+            
+            {/* Header */}
+            <div class="flex items-center justify-between border-b border-obsidian-700 pb-3">
+              <div>
+                <span class="text-xs font-bold text-brass-400 uppercase tracking-widest">
+                  MATCH RESULT, BANS &amp; HERO LOCKS
+                </span>
+                <h3 class="text-xl font-deco font-extrabold text-white">
+                  {currentMatch.roundLabel}
+                </h3>
+              </div>
+              <button onClick={onClose} class="text-slate-400 hover:text-white text-2xl font-bold">✕</button>
+            </div>
+
+            {/* Score Overview & Stream Setting */}
+            <div class="bg-obsidian-950 p-4 rounded-xl border border-brass-500/30 flex flex-col md:flex-row items-center justify-between gap-4">
+              <div class="flex items-center gap-6">
+                <div>
+                  <div class="text-sm font-bold text-brass-300">
+                    {teamA ? `${teamA.name} [${teamA.tag}]` : "Team A"}
+                  </div>
+                  <div class="text-3xl font-black font-mono text-white mt-1">{res.scoreA}</div>
+                </div>
+
+                <div class="text-slate-500 font-mono text-xl">VS</div>
+
+                <div>
+                  <div class="text-sm font-bold text-brass-300">
+                    {teamB ? `${teamB.name} [${teamB.tag}]` : "Team B"}
+                  </div>
+                  <div class="text-3xl font-black font-mono text-white mt-1">{res.scoreB}</div>
+                </div>
+              </div>
+
+              <div class="flex flex-col gap-2">
+                <div class="flex items-center gap-2 text-xs">
+                  <span class="text-slate-400">Stream Broadcast:</span>
+                  <select
+                    value={currentMatch.streamMode}
+                    onChange={(e) => setCurrentMatch({ ...currentMatch, streamMode: e.target.value })}
+                    class="bg-obsidian-800 text-amber-300 px-2 py-1 rounded border border-obsidian-700 font-semibold focus:outline-none"
+                  >
+                    <option value="Main Stream">📺 Main Stream</option>
+                    <option value="Off-Stream (To Save Time)">🎬 Off-Stream (To Save Time)</option>
+                  </select>
+                </div>
+
+                <div class="flex items-center gap-2 text-xs">
+                  <span class="text-slate-400">Status:</span>
+                  <select
+                    value={currentMatch.status}
+                    onChange={(e) => setCurrentMatch({ ...currentMatch, status: e.target.value })}
+                    class="bg-obsidian-800 text-white px-2 py-1 rounded border border-obsidian-700 focus:outline-none"
+                  >
+                    <option value="upcoming">Upcoming</option>
+                    <option value="live">Live</option>
+                    <option value="completed">Completed</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Individual Games */}
+            <div class="space-y-4">
+              {currentMatch.games.map((game, gIdx) => (
+                <div key={gIdx} class="bg-obsidian-950 p-4 rounded-lg border border-obsidian-700 space-y-3">
+                  <div class="flex flex-wrap items-center justify-between gap-2 border-b border-obsidian-800 pb-2">
+                    <span class="font-deco font-bold text-brass-400 text-sm">
+                      GAME {gIdx + 1}
+                    </span>
+
+                    <div class="flex items-center gap-4 text-xs">
+                      <div class="flex items-center gap-1.5">
+                        <span class="text-slate-400">Game Winner:</span>
+                        <select
+                          value={game.winner || ""}
+                          onChange={(e) => handleGameUpdate(gIdx, "winner", e.target.value || null)}
+                          class="bg-obsidian-800 text-amber-300 font-bold px-2 py-1 rounded border border-obsidian-700 focus:outline-none"
+                        >
+                          <option value="">-- Unplayed --</option>
+                          <option value="teamA">{teamA ? teamA.name : "Team A"}</option>
+                          <option value="teamB">{teamB ? teamB.name : "Team B"}</option>
+                        </select>
+                      </div>
+
+                      <label class="flex items-center gap-1.5 cursor-pointer bg-obsidian-900 border border-obsidian-700 px-2 py-1 rounded">
+                        <input
+                          type="checkbox"
+                          checked={game.screenshotVerified || false}
+                          onChange={(e) => handleGameUpdate(gIdx, "screenshotVerified", e.target.checked)}
+                          class="accent-brass-500"
+                        />
+                        <span class={game.screenshotVerified ? "text-emerald-400 font-bold" : "text-slate-400"}>
+                          📸 Screenshot Verified
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* 2 Bans per Team = 4 Bans Total */}
+                  <div class="bg-obsidian-900/80 p-3 rounded border border-obsidian-800 space-y-2 text-xs">
+                    <div class="font-semibold text-brass-400">
+                      🚫 Hero Bans (2 per team = 4 total per game)
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <span class="text-slate-400 font-mono text-[11px] block mb-1">
+                          {teamA ? teamA.tag : "Team A"} Bans:
+                        </span>
+                        <div class="flex gap-2">
+                          {[0, 1].map(bIdx => (
+                            <select
+                              key={bIdx}
+                              value={(game.bansA && game.bansA[bIdx]) || ""}
+                              onChange={(e) => handleBanChange(gIdx, 'A', bIdx, e.target.value)}
+                              class="bg-obsidian-950 text-red-300 px-2 py-1 rounded border border-obsidian-700 w-full focus:outline-none"
+                            >
+                              <option value="">Ban {bIdx + 1}</option>
+                              {HEROES.map(h => (
+                                <option key={h.id} value={h.name}>{h.name}</option>
+                              ))}
+                            </select>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div>
+                        <span class="text-slate-400 font-mono text-[11px] block mb-1">
+                          {teamB ? teamB.tag : "Team B"} Bans:
+                        </span>
+                        <div class="flex gap-2">
+                          {[0, 1].map(bIdx => (
+                            <select
+                              key={bIdx}
+                              value={(game.bansB && game.bansB[bIdx]) || ""}
+                              onChange={(e) => handleBanChange(gIdx, 'B', bIdx, e.target.value)}
+                              class="bg-obsidian-950 text-red-300 px-2 py-1 rounded border border-obsidian-700 w-full focus:outline-none"
+                            >
+                              <option value="">Ban {bIdx + 1}</option>
+                              {HEROES.map(h => (
+                                <option key={h.id} value={h.name}>{h.name}</option>
+                              ))}
+                            </select>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Sides & Notes */}
+                  <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                    <div>
+                      <span class="text-slate-400 block mb-1">{teamA ? teamA.tag : "Team A"} Side:</span>
+                      <select
+                        value={game.sideA}
+                        onChange={(e) => handleGameUpdate(gIdx, "sideA", e.target.value)}
+                        class="w-full bg-obsidian-900 text-amber-400 px-2 py-1 rounded border border-obsidian-800"
+                      >
+                        <option value="Amber Hand">Amber Hand 🟡</option>
+                        <option value="Sapphire Flame">Sapphire Flame 🔵</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <span class="text-slate-400 block mb-1">{teamB ? teamB.tag : "Team B"} Side:</span>
+                      <select
+                        value={game.sideB}
+                        onChange={(e) => handleGameUpdate(gIdx, "sideB", e.target.value)}
+                        class="w-full bg-obsidian-900 text-sapphire-400 px-2 py-1 rounded border border-obsidian-800"
+                      >
+                        <option value="Sapphire Flame">Sapphire Flame 🔵</option>
+                        <option value="Amber Hand">Amber Hand 🟡</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <span class="text-slate-400 block mb-1">MVP / Notes:</span>
+                      <input
+                        type="text"
+                        placeholder="Player handle or notes"
+                        value={game.mvp || ""}
+                        onChange={(e) => handleGameUpdate(gIdx, "mvp", e.target.value)}
+                        class="w-full bg-obsidian-900 text-slate-200 px-2 py-1 rounded border border-obsidian-800"
+                      />
+                    </div>
+                  </div>
+
+                </div>
+              ))}
+            </div>
+
+            {/* Actions */}
+            <div class="flex items-center justify-end gap-3 border-t border-obsidian-700 pt-4">
+              <button
+                onClick={onClose}
+                class="bg-obsidian-800 hover:bg-obsidian-700 text-slate-300 text-xs px-4 py-2 rounded font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => onSave(currentMatch)}
+                class="bg-brass-500 hover:bg-brass-400 text-obsidian-950 font-bold text-xs px-5 py-2 rounded shadow"
+              >
+                💾 Save Match Changes
+              </button>
+            </div>
+
+          </div>
+        </div>
+      );
+    }
+
+    // Render React App
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
